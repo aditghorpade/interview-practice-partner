@@ -39,10 +39,10 @@ model = get_gemini_model()
 
 st.set_page_config(page_title="Interview Practice Partner", page_icon="🎤")
 
-st.title("🎤 Interview Practice Partner (Gemini Flash)")
+st.title("Interview Practice Partner")
 st.write(
     "Practice job interviews with an intelligent AI interviewer powered by "
-    "**Gemini Flash** over the internet."
+    "**Gemini Flash**."
 )
 
 # ============================================================
@@ -176,7 +176,13 @@ def infer_persona(qa_list):
     if 5 <= word_count <= 40 and last_issue == "ok":
         return "Very Efficient (short, focused answers)"
 
-    # 3) Technical / detail-oriented
+
+
+    # 4) Chatty — only if long and confident
+    if word_count > 100 or sentence_count >= 4:
+        return "Chatty (talks a lot, easily off-topic)"
+
+        # 3) Technical / detail-oriented
     tech_keywords = [
         "c", "c++", "java", "python", "django", "react", "api", "sql", "database",
         "docker", "time complexity", "multithreading", "multi-threading",
@@ -184,18 +190,6 @@ def infer_persona(qa_list):
     ]
     if any(t in ans for t in tech_keywords):
         return "Technical / Detail-Oriented"
-
-    # 4) Chatty — only if long and confident
-    if word_count > 80 or sentence_count >= 4:
-        confident_markers = [
-            "i worked on",
-            "i built",
-            "i developed",
-            "i implemented",
-            "i designed",
-        ]
-        if any(p in ans for p in confident_markers):
-            return "Chatty (talks a lot, easily off-topic)"
 
     # 5) Default
     return "Balanced"
@@ -439,6 +433,73 @@ def generate_ai_question(role, mode, persona, previous_qa):
     live = st.session_state.live_note or {}
     role_lower = (role or "").lower()
 
+    # -------------------------
+    # AI comfort + easy next question for confused intros
+    # -------------------------
+    confused_intro_markers = [
+        "not really sure",
+        "i'm not sure",
+        "i'm not totally sure",
+        "not sure",
+        "i guess",
+        "i don't know",
+        "no idea",
+        "i am lost",
+        "i'm lost",
+        "still figuring out",
+        "maybe",
+    ]
+
+    if len(previous_qa) == 1 and any(m in last_a for m in confused_intro_markers):
+        try:
+            comfort_prompt = f"""
+You are a friendly, supportive interview coach.
+
+Candidate intro:
+"{previous_qa[0]['a']}"
+
+Role: {role}
+
+Your task:
+1. Give a SHORT, warm comfort message that:
+   - acknowledges uncertainty
+   - reduces pressure
+   - encourages participation
+   - does NOT repeat the intro question
+   - <= 2 sentences
+
+2. Then generate ONE very simple, low-pressure follow-up question
+   tailored to the role, such as:
+   - Sales: helping a friend decide what to buy
+   - Software Engineer: fixing a problem or helping someone with tech
+   - Data Analyst: organizing information or making a simple decision with data
+   - Product Manager: choosing features or improvements for something
+
+3. The question MUST:
+   - be easy to answer
+   - be future-progressing (not "introduce yourself again")
+   - <= 18 words
+   - end with a "?"
+
+Output JSON ONLY:
+
+{{
+  "comfort": "...",
+  "next_question": "?"
+}}
+"""
+            resp = model.generate_content(comfort_prompt)
+            ai_out = try_parse_json(resp.text)
+
+            if ai_out and "comfort" in ai_out and "next_question" in ai_out:
+                st.session_state.last_question = ai_out["next_question"]
+                st.session_state.repeat_count = 0
+                return f"{ai_out['comfort']}\n\n{ai_out['next_question']}"
+
+        except Exception:
+            pass  
+
+
     # --------------------------------------------------------
     # Candidate explicitly asks for an example answer
     # --------------------------------------------------------
@@ -564,20 +625,10 @@ Provide a SHORT, friendly, HR-safe reply that:
     # --------------------------------------------------------
     clarification_phrases = [
         "what do you mean",
-        "be more specific",
-        "clarify",
-        "rephrase",
-        "not clear",
-        "i didn't understand",
-        "can u please elaborate",
+        "can you explain",
         "can you elaborate",
         "please elaborate",
-        "elaborate",
-        "i am not sure",
-        "im not sure",
-        "can you explain",
-        "could you elaborate",
-        "could you explain",
+        "repeat the question",
     ]
     if contains(last_a, clarification_phrases) or (
         last_issue in ("too_short", "too_vague") and "elaborate" in last_a
@@ -1009,7 +1060,7 @@ if st.session_state.stage == "setup":
         value=5,
     )
 
-    if st.button("Start Interview"):
+    if st.button("Start Interview 🚀 "):
         st.session_state.role = role
         # Internally we keep a single mode "Mixed" for now, but keep the field for extension
         st.session_state.mode = "Mixed"
@@ -1067,11 +1118,11 @@ elif st.session_state.stage == "interview":
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        submit_btn = st.button("Submit & Next")
+        submit_btn = st.button("✅ Submit & Next")
     with col2:
-        end_btn = st.button("End Interview Now")
+        end_btn = st.button("🛑 End Interview")
     with col3:
-        skip_btn = st.button("Skip Question")
+        skip_btn = st.button("⏭ Skip")
 
     # When user submits an answer, analyze and store it, but don't show per-question feedback
     if submit_btn:
